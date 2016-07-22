@@ -1112,9 +1112,9 @@ class Audio:
 
         await self._join_voice_channel(voice_channel)
 
-    @commands.command(pass_context=True, no_pm=True)
+    @commands.command(name="sb", pass_context=True, no_pm=True)
     async def local(self, ctx, name):
-        """Plays a local playlist"""
+        """Play a clip.  See https://drela.one/musicbot.html for a list of files."""
         server = ctx.message.server
         author = ctx.message.author
         voice_channel = author.voice_channel
@@ -1427,6 +1427,14 @@ class Audio:
             await self.bot.say("Playlist queued.")
         else:
             await self.bot.say("That playlist does not exist.")
+
+    @commands.command(name="random", pass_context=True, no_pm=True)
+    async def soundboard_random(self, ctx):
+        """Plays a random soundboard clip"""
+        random_clip =  choice(self._list_local_playlists())
+        await self.bot.say("Picking a clip at random...  {}!".format(random_clip))
+        await ctx.invoke(self.local, random_clip)
+
 
     @playlist.command(pass_context=True, no_pm=True, name="mix")
     async def playlist_start_mix(self, ctx, name):
