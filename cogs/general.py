@@ -1,9 +1,10 @@
 import discord
 from discord.ext import commands
-from .utils.chat_formatting import *
+from .utils.chat_formatting import escape_mass_mentions, italics, pagify
 from random import randint
 from random import choice
 from enum import Enum
+from urllib.parse import quote_plus
 import datetime
 import time
 import aiohttp
@@ -154,14 +155,14 @@ class General:
     async def lmgtfy(self, *, search_terms : str):
         """Creates a lmgtfy link"""
         search_terms = escape_mass_mentions(search_terms.replace(" ", "+"))
-        await self.bot.say("http://lmgtfy.com/?q={}".format(search_terms))
+        await self.bot.say("https://lmgtfy.com/?q={}".format(search_terms))
 
     @commands.command(no_pm=True, hidden=True)
     async def hug(self, user : discord.Member, intensity : int=1):
         """Because everyone likes hugs
 
         Up to 10 intensity levels."""
-        name = " *" + user.name + "*"
+        name = italics(user.display_name)
         if intensity <= 0:
             msg = "(っ˘̩╭╮˘̩)っ" + name
         elif intensity <= 3:
@@ -171,7 +172,7 @@ class General:
         elif intensity <= 9:
             msg = "(つ≧▽≦)つ" + name
         elif intensity >= 10:
-            msg = "(づ￣ ³￣)づ" + name + " ⊂(´・ω・｀⊂)"
+            msg = "(づ￣ ³￣)づ{} ⊂(´・ω・｀⊂)".format(name)
         await self.bot.say(msg)
 
     @commands.command(pass_context=True, no_pm=True)
@@ -219,13 +220,14 @@ class General:
         data.set_footer(text="Member #{} | User ID:{}"
                              "".format(member_number, user.id))
 
+        name = str(user)
+        name = " ~ ".join((name, user.nick)) if user.nick else name
+
         if user.avatar_url:
-            name = str(user)
-            name = " ~ ".join((name, user.nick)) if user.nick else name
             data.set_author(name=name, url=user.avatar_url)
             data.set_thumbnail(url=user.avatar_url)
         else:
-            data.set_author(name=user.name)
+            data.set_author(name=name)
 
         try:
             await self.bot.say(embed=data)
@@ -280,8 +282,12 @@ class General:
         """Urban Dictionary search
 
         Definition number must be between 1 and 10"""
+        def encode(s):
+            return quote_plus(s, encoding='utf-8', errors='replace')
+
         # definition_number is just there to show up in the help
         # all this mess is to avoid forcing double quotes on the user
+
         search_terms = search_terms.split(" ")
         try:
             if len(search_terms) > 1:
@@ -293,7 +299,8 @@ class General:
                 pos = 0                 # top 10 definitions
         except ValueError:
             pos = 0
-        search_terms = "+".join(search_terms)
+
+        search_terms = "+".join([encode(s) for s in search_terms])
         url = "http://api.urbandictionary.com/v0/define?term=" + search_terms
         try:
             async with aiohttp.get(url) as r:
@@ -332,7 +339,7 @@ class General:
             if "@everyone" in check or "@here" in check:
                 await self.bot.say("Nice try.")
                 return
-            p = NewPoll(message, self)
+            p = NewPoll(message, " ".join(text), self)
             if p.valid:
                 self.poll_sessions.append(p)
                 await p.start()
@@ -370,13 +377,12 @@ class General:
             return user.joined_at
 
 class NewPoll():
-    def __init__(self, message, main):
+    def __init__(self, message, text, main):
         self.channel = message.channel
         self.author = message.author.id
         self.client = main.bot
         self.poll_sessions = main.poll_sessions
-        msg = message.content[6:]
-        msg = msg.split(";")
+        msg = [ans.strip() for ans in text.split(";")]
         if len(msg) < 2: # Needs at least one question and 2 choices
             self.valid = False
             return None

@@ -70,7 +70,7 @@ Which champion's ultimate is named: Massacre?`Aatrox
 Which champion's ultimate is named: Noxian Guillotine?`Darius
 Which champion's ultimate is named: Soul Shackles?`Morgana
 Which champion's ultimate is named: Unstoppable Onslaught?`Sion
-Which champion's ultimate is named: Living ARtiller?`Kog'maw`kogmaw`kog maw
+Which champion's ultimate is named: Living Artillery?`Kog'maw`kogmaw`kog maw
 Which champion's ultimate is named: Primordial Burst?`Veigar
 Which champion's ultimate is named: Dragon's Descent?`Shyvana
 Which champion's ultimate is named: Demacian Justice?`Garen
@@ -94,7 +94,7 @@ Which champion's ultimate is named: Agony's Embrace?`Evelynn
 Which champion's ultimate is named: Grand Skyfall?`Pantheon
 Which champion's ultimate is named: Shadow Dance?`Akali
 Which champion's ultimate is named: Highlander?`Master Yi
-Which champion's ultimate is named: Omen of Death?`Yorick
+Which champion's ultimate is named: Eulogy of the Isles?`Yorick
 Which champion's ultimate is named: Final Spark?`Lux
 Which champion's ultimate is named: Onslaught of Shadows?`Hecarim
 Which champion's ultimate is named: Stand United?`Shen
@@ -102,7 +102,7 @@ Which champion's ultimate is named: Assault and Battery?`Vi
 Which champion's ultimate is named: Abyssal Voyage?`Tahm Kench`tahmkench
 Which champion's ultimate is named: Dominus?`Renekton
 Which champion's ultimate is named: Mega Inferno Bomb?`Ziggs
-Which champion's ultimate is named: Desperate Power?`Ryze
+Which champion's ultimate is named: Realm Warp?`Ryze
 Which champion's ultimate is named: Solar Flare?`Leona
 Which champion's ultimate is named: Impale?`Skarner
 Which champion's ultimate is named: Grand Challenge?`Fiora
@@ -113,8 +113,8 @@ Which champion's ultimate is named: Leap of Faith?`Illaoi
 Which champion's ultimate is named: Dragon's Rage?`Lee Sin`leesin
 Which champion's ultimate is named: Pheonix Stance?`Udyr
 Which champion's ultimate is named: Whirling Death?`Draven
-Which champion's ultimate is named: Hyper-Kinteic Position Reverser?`Urgot
-Which champion's ultimate is named: Idol of Durand?`Galio
+Which champion's ultimate is named: Fear Beyond Death?`Urgot
+Which champion's ultimate is named: Hero's Entrance?`Galio
 Which champion's ultimate is named: Glacial Fissure?`Braum
 Which champion's ultimate is named: Subjugate?`Trundle
 Which champion's ultimate is named: Unleashed Power?`Syndra
@@ -130,3 +130,9 @@ Which champion's ultimate is named: Voice of Light?`Aurelion Sol`aurelionsol
 Which champion's ultimate is named: Chaaaaaaaarge!!! ?`Kled
 Which champion's ultimate is named: Daisy!?`Ivern
 Which champion's ultimate is named: Hextech Ultimatum?`Camille
+Which champion's ultimate is named: Curse of the Sad Mummy?`Amumu
+Which champion's ultimate is named: Weaver's Wall?`Taliyah
+Which champion's ultimate is named: The Quickness?`Rakan
+Which champion's ultimate is named: Featherstorm?`Xayah
+Which champion's ultimate is named: Umbral Trespass?`Kayn
+Which champion's ultimate is named: Call of the Forge God?`Ornn

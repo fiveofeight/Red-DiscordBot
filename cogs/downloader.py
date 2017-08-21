@@ -4,7 +4,7 @@ from cogs.utils import checks
 from cogs.utils.chat_formatting import pagify, box
 from __main__ import send_cmd_help, set_cog
 import os
-from subprocess import run, PIPE
+from subprocess import run as sp_run, PIPE
 import shutil
 from asyncio import as_completed
 from setuptools import distutils
@@ -12,11 +12,21 @@ import discord
 from functools import partial
 from concurrent.futures import ThreadPoolExecutor
 from time import time
+from importlib.util import find_spec
+from copy import deepcopy
 
 NUM_THREADS = 4
 REPO_NONEX = 0x1
 REPO_CLONE = 0x2
 REPO_SAME = 0x4
+REPOS_LIST = "https://twentysix26.github.io/Red-Docs/red_cog_approved_repos/"
+
+DISCLAIMER = ("You're about to add a 3rd party repository. The creator of Red"
+              " and its community have no responsibility for any potential "
+              "damage that the content of 3rd party repositories might cause."
+              "\nBy typing 'I agree' you declare to have read and understand "
+              "the above message. This message won't be shown again until the"
+              " next reboot.")
 
 
 class UpdateError(Exception):
@@ -27,13 +37,18 @@ class CloningError(UpdateError):
     pass
 
 
+class RequirementFail(UpdateError):
+    pass
+
+
 class Downloader:
     """Cog downloader/installer."""
 
     def __init__(self, bot):
         self.bot = bot
-        self.path = "data/downloader/"
-        self.file_path = "data/downloader/repos.json"
+        self.disclaimer_accepted = False
+        self.path = os.path.join("data", "downloader")
+        self.file_path = os.path.join(self.path, "repos.json")
         # {name:{url,cog1:{installed},cog1:{installed}}}
         self.repos = dataIO.load_json(self.file_path)
         self.executor = ThreadPoolExecutor(NUM_THREADS)
@@ -63,24 +78,18 @@ class Downloader:
 
         Warning: Adding 3RD Party Repositories is at your own
         Risk."""
-        await self.bot.say("Type 'I agree' to confirm "
-                           "adding a 3rd party repo. This has the possibility"
-                           " of being harmful. You will not receive help "
-                           "in Red - Discord Bot #support for any cogs "
-                           "installed from this repo. If you do require "
-                           "support you should contact the owner of this "
-                           "repo.\n\nAgain, ANY repo you add is at YOUR"
-                           " discretion and the creator of Red has "
-                           "ABSOLUTELY ZERO responsibility to help if "
-                           "something goes wrong.")
-        answer = await self.bot.wait_for_message(timeout=15,
-                                                 author=ctx.message.author)
-        if answer is None:
-            await self.bot.say('Not adding repo.')
-            return
-        elif "i agree" not in answer.content.lower():
-            await self.bot.say('Not adding repo.')
-            return
+        if not self.disclaimer_accepted:
+            await self.bot.say(DISCLAIMER)
+            answer = await self.bot.wait_for_message(timeout=30,
+                                                     author=ctx.message.author)
+            if answer is None:
+                await self.bot.say('Not adding repo.')
+                return
+            elif "i agree" not in answer.content.lower():
+                await self.bot.say('Not adding repo.')
+                return
+            else:
+                self.disclaimer_accepted = True
         self.repos[repo_name] = {}
         self.repos[repo_name]['url'] = repo_url
         try:
@@ -102,17 +111,27 @@ class Downloader:
     @repo.command(name="remove")
     async def _repo_del(self, repo_name: str):
         """Removes repo from repo list. COGS ARE NOT REMOVED."""
+        def remove_readonly(func, path, excinfo):
+            os.chmod(path, 0o755)
+            func(path)
+
         if repo_name not in self.repos:
             await self.bot.say("That repo doesn't exist.")
             return
         del self.repos[repo_name]
-        #shutil.rmtree(os.path.join(self.path, repo_name))
+        try:
+            shutil.rmtree(os.path.join(self.path, repo_name), onerror=remove_readonly)
+        except FileNotFoundError:
+            pass
         self.save_repos()
         await self.bot.say("Repo '{}' removed.".format(repo_name))
 
     @cog.command(name="list")
     async def _send_list(self, repo_name=None):
-        """Lists installable cogs"""
+        """Lists installable cogs
+
+        Repositories list:
+        https://twentysix26.github.io/Red-Docs/red_cog_approved_repos/"""
         retlist = []
         if repo_name and repo_name in self.repos:
             msg = "Available cogs:\n"
@@ -120,22 +139,30 @@ class Downloader:
                 if 'url' == cog:
                     continue
                 data = self.get_info_data(repo_name, cog)
+                if data and data.get("HIDDEN") is True:
+                    continue
                 if data:
                     retlist.append([cog, data.get("SHORT", "")])
                 else:
                     retlist.append([cog, ''])
         else:
-            msg = "Available repos:\n"
-            for repo_name in sorted(self.repos.keys()):
-                data = self.get_info_data(repo_name)
-                if data:
-                    retlist.append([repo_name, data.get("SHORT", "")])
-                else:
-                    retlist.append([repo_name, ""])
+            if self.repos:
+                msg = "Available repos:\n"
+                for repo_name in sorted(self.repos.keys()):
+                    data = self.get_info_data(repo_name)
+                    if data:
+                        retlist.append([repo_name, data.get("SHORT", "")])
+                    else:
+                        retlist.append([repo_name, ""])
+            else:
+                await self.bot.say("You haven't added a repository yet.\n"
+                                   "Start now! {}".format(REPOS_LIST))
+                return
 
         col_width = max(len(row[0]) for row in retlist) + 2
         for row in retlist:
             msg += "\t" + "".join(word.ljust(col_width) for word in row) + "\n"
+        msg += "\nRepositories list: {}".format(REPOS_LIST)
         for page in pagify(msg, delims=['\n'], shorten_by=8):
             await self.bot.say(box(page))
 
@@ -207,6 +234,7 @@ class Downloader:
         updated_cogs = []
         new_cogs = []
         deleted_cogs = []
+        failed_cogs = []
         error_repos = {}
         installed_updated_cogs = []
 
@@ -233,6 +261,21 @@ class Downloader:
                 msg = await self._robust_edit(msg, base_msg + status)
         status = 'done. '
 
+        for t in updated_cogs:
+            repo, cog, _ = t
+            if self.repos[repo][cog]['INSTALLED']:
+                try:
+                    await self.install(repo, cog,
+                                       no_install_on_reqs_fail=False)
+                except RequirementFail:
+                    failed_cogs.append(t)
+                else:
+                    installed_updated_cogs.append(t)
+
+        for t in updated_cogs.copy():
+            if t in failed_cogs:
+                updated_cogs.remove(t)
+
         if not any(self.repos[repo][cog]['INSTALLED'] for
                    repo, cog, _ in updated_cogs):
             status += ' No updates to apply. '
@@ -246,21 +289,16 @@ class Downloader:
         if updated_cogs:
             status += '\nUpdated cogs: ' \
                    + ', '.join('%s/%s' % c[:2] for c in updated_cogs) + '.'
+        if failed_cogs:
+            status += '\nCogs that got new requirements which have ' + \
+                   'failed to install: ' + \
+                   ', '.join('%s/%s' % c[:2] for c in failed_cogs) + '.'
         if error_repos:
             status += '\nThe following repos failed to update: '
             for n, what in error_repos.items():
                 status += '\n%s: %s' % (n, what)
 
         msg = await self._robust_edit(msg, base_msg + status)
-
-        registry = dataIO.load_json("data/red/cogs.json")
-
-        for t in updated_cogs:
-            repo, cog, _ = t
-            if (self.repos[repo][cog]['INSTALLED'] and
-                    registry.get('cogs.' + cog, False)):
-                installed_updated_cogs.append(t)
-                await self.install(repo, cog)
 
         if not installed_updated_cogs:
             return
@@ -280,9 +318,12 @@ class Downloader:
             await self.bot.say("Ok then, you can reload cogs with"
                                " `{}reload <cog_name>`".format(ctx.prefix))
         elif answer.content.lower().strip() == "yes":
+            registry = dataIO.load_json(os.path.join("data", "red", "cogs.json"))
             update_list = []
             fail_list = []
             for repo, cog, _ in installed_updated_cogs:
+                if not registry.get('cogs.' + cog, False):
+                    continue
                 try:
                     self.bot.unload_extension("cogs." + cog)
                     self.bot.load_extension("cogs." + cog)
@@ -304,14 +345,13 @@ class Downloader:
 
     def patch_notes_handler(self, repo_cog_hash_pairs):
         for repo, cog, oldhash in repo_cog_hash_pairs:
-            pathsplit = self.repos[repo][cog]['file'].split('/')
-            repo_path = os.path.join(*pathsplit[:-2])
-            cogfile = os.path.join(*pathsplit[-2:])
+            repo_path = os.path.join('data', 'downloader', repo)
+            cogfile = os.path.join(cog, cog + ".py")
             cmd = ["git", "-C", repo_path, "log", "--relative-date",
                    "--reverse", oldhash + '..', cogfile
                    ]
             try:
-                log = run(cmd, stdout=PIPE).stdout.decode().strip()
+                log = sp_run(cmd, stdout=PIPE).stdout.decode().strip()
                 yield self.format_patch(repo, cog, log)
             except:
                 pass
@@ -330,7 +370,7 @@ class Downloader:
         self.save_repos()
         os.remove(os.path.join("cogs", cog + ".py"))
         owner = self.bot.get_cog('Owner')
-        await owner.unload.callback(owner, module=cog)
+        await owner.unload.callback(owner, cog_name=cog)
         await self.bot.say("Cog successfully uninstalled.")
 
     @cog.command(name="install", pass_context=True)
@@ -342,8 +382,14 @@ class Downloader:
         if cog not in self.repos[repo_name]:
             await self.bot.say("That cog isn't available from that repo.")
             return
-        install_cog = await self.install(repo_name, cog)
         data = self.get_info_data(repo_name, cog)
+        try:
+            install_cog = await self.install(repo_name, cog, notify_reqs=True)
+        except RequirementFail:
+            await self.bot.say("That cog has requirements that I could not "
+                               "install. Check the console for more "
+                               "informations.")
+            return
         if data is not None:
             install_msg = data.get("INSTALL_MSG", None)
             if install_msg:
@@ -358,7 +404,7 @@ class Downloader:
             elif answer.content.lower().strip() == "yes":
                 set_cog("cogs." + cog, True)
                 owner = self.bot.get_cog('Owner')
-                await owner.load.callback(owner, module=cog)
+                await owner.load.callback(owner, cog_name=cog)
             else:
                 await self.bot.say("Ok then, you can load it with"
                                    " `{}load {}`".format(ctx.prefix, cog))
@@ -368,15 +414,42 @@ class Downloader:
             await self.bot.say("That cog doesn't exist. Use cog list to see"
                                " the full list.")
 
-    async def install(self, repo_name, cog):
+    async def install(self, repo_name, cog, *, notify_reqs=False,
+                      no_install_on_reqs_fail=True):
+        # 'no_install_on_reqs_fail' will make the cog get installed anyway
+        # on requirements installation fail. This is necessary because due to
+        # how 'cog update' works right now, the user would have no way to
+        # reupdate the cog if the update fails, since 'cog update' only
+        # updates the cogs that get a new commit.
+        # This is not a great way to deal with the problem and a cog update
+        # rework would probably be the best course of action.
+        reqs_failed = False
         if cog.endswith('.py'):
             cog = cog[:-3]
 
         path = self.repos[repo_name][cog]['file']
         cog_folder_path = self.repos[repo_name][cog]['folder']
         cog_data_path = os.path.join(cog_folder_path, 'data')
+        data = self.get_info_data(repo_name, cog)
+        if data is not None:
+            requirements = data.get("REQUIREMENTS", [])
 
-        to_path = os.path.join("cogs/", cog + ".py")
+            requirements = [r for r in requirements
+                            if not self.is_lib_installed(r)]
+
+            if requirements and notify_reqs:
+                await self.bot.say("Installing cog's requirements...")
+
+            for requirement in requirements:
+                if not self.is_lib_installed(requirement):
+                    success = await self.bot.pip_install(requirement)
+                    if not success:
+                        if no_install_on_reqs_fail:
+                            raise RequirementFail()
+                        else:
+                            reqs_failed = True
+
+        to_path = os.path.join("cogs", cog + ".py")
 
         print("Copying {}...".format(cog))
         shutil.copy(path, to_path)
@@ -384,10 +457,13 @@ class Downloader:
         if os.path.exists(cog_data_path):
             print("Copying {}'s data folder...".format(cog))
             distutils.dir_util.copy_tree(cog_data_path,
-                                         os.path.join('data/', cog))
+                                         os.path.join('data', cog))
         self.repos[repo_name][cog]['INSTALLED'] = True
         self.save_repos()
-        return True
+        if not reqs_failed:
+            return True
+        else:
+            raise RequirementFail()
 
     def get_info_data(self, repo_name, cog=None):
         if cog is not None:
@@ -440,9 +516,28 @@ class Downloader:
         git_name = splitted[-1]
         return git_name[:-4]
 
+    def is_lib_installed(self, name):
+        return bool(find_spec(name))
+
     def _do_first_run(self):
-        invalid = []
         save = False
+        repos_copy = deepcopy(self.repos)
+
+        # Issue 725
+        for repo in repos_copy:
+            for cog in repos_copy[repo]:
+                cog_data = repos_copy[repo][cog]
+                if isinstance(cog_data, str):  # ... url field
+                    continue
+                for k, v in cog_data.items():
+                    if k in ("file", "folder"):
+                        repos_copy[repo][cog][k] = os.path.normpath(cog_data[k])
+
+        if self.repos != repos_copy:
+            self.repos = repos_copy
+            save = True
+
+        invalid = []
 
         for repo in self.repos:
             broken = 'url' in self.repos[repo] and len(self.repos[repo]) == 1
@@ -478,6 +573,13 @@ class Downloader:
                 del self.repos[name][cog]
 
     def update_repo(self, name):
+
+        def run(*args, **kwargs):
+            env = os.environ.copy()
+            env['GIT_TERMINAL_PROMPT'] = '0'
+            kwargs['env'] = env
+            return sp_run(*args, **kwargs)
+
         try:
             dd = self.path
             if name not in self.repos:
@@ -490,22 +592,32 @@ class Downloader:
                 url = self.repos[name].get('url')
                 if not url:
                     raise UpdateError("Need to clone but no URL set")
-                p = run(["git", "clone", url, dd + name])
+                branch = None
+                if "@" in url: # Specific branch
+                    url, branch = url.rsplit("@", maxsplit=1)
+                if branch is None:
+                    p = run(["git", "clone", url, folder])
+                else:
+                    p = run(["git", "clone", "-b", branch, url, folder])
                 if p.returncode != 0:
                     raise CloningError()
                 self.populate_list(name)
                 return name, REPO_CLONE, None
             else:
-                rpcmd = ["git", "-C", dd + name, "rev-parse", "HEAD"]
-                p = run(["git", "-C", dd + name, "reset", "--hard",
-                        "origin/HEAD", "-q"])
+                rpbcmd = ["git", "-C", folder, "rev-parse", "--abbrev-ref", "HEAD"]
+                p = run(rpbcmd, stdout=PIPE)
+                branch = p.stdout.decode().strip()
+
+                rpcmd = ["git", "-C", folder, "rev-parse", branch]
+                p = run(["git", "-C", folder, "reset", "--hard",
+                        "origin/%s" % branch, "-q"])
                 if p.returncode != 0:
-                    raise UpdateError("Error resetting to origin/HEAD")
+                    raise UpdateError("Error resetting to origin/%s" % branch)
                 p = run(rpcmd, stdout=PIPE)
                 if p.returncode != 0:
                     raise UpdateError("Unable to determine old commit hash")
                 oldhash = p.stdout.decode().strip()
-                p = run(["git", "-C", dd + name, "pull", "-q"])
+                p = run(["git", "-C", folder, "pull", "-q", "--ff-only"])
                 if p.returncode != 0:
                     raise UpdateError("Error pulling updates")
                 p = run(rpcmd, stdout=PIPE)
@@ -518,21 +630,27 @@ class Downloader:
                     self.populate_list(name)
                     self.save_repos()
                     ret = {}
-                    cmd = ['git', '-C', dd + name, 'diff', '--no-commit-id',
+                    cmd = ['git', '-C', folder, 'diff', '--no-commit-id',
                            '--name-status', oldhash, newhash]
                     p = run(cmd, stdout=PIPE)
+
                     if p.returncode != 0:
                         raise UpdateError("Error in git diff")
+
                     changed = p.stdout.strip().decode().split('\n')
+
                     for f in changed:
                         if not f.endswith('.py'):
                             continue
-                        status, cogpath = f.split('\t')
+
+                        status, _, cogpath = f.partition('\t')
                         cogname = os.path.split(cogpath)[-1][:-3]  # strip .py
                         if status not in ret:
                             ret[status] = []
                         ret[status].append(cogname)
+
                     return name, ret, oldhash
+
         except CloningError as e:
             raise CloningError(name, *e.args) from None
         except UpdateError as e:
@@ -556,19 +674,16 @@ class Downloader:
 
 
 def check_folders():
-    if not os.path.exists("data/downloader"):
+    if not os.path.exists(os.path.join("data", "downloader")):
         print('Making repo downloads folder...')
-        os.mkdir('data/downloader')
+        os.mkdir(os.path.join("data", "downloader"))
 
 
 def check_files():
-    repos = \
-        {'community': {'url': "https://github.com/Twentysix26/Red-Cogs.git"}}
-
-    f = "data/downloader/repos.json"
+    f = os.path.join("data", "downloader", "repos.json")
     if not dataIO.is_valid_json(f):
         print("Creating default data/downloader/repos.json")
-        dataIO.save_json(f, repos)
+        dataIO.save_json(f, {})
 
 
 def setup(bot):
