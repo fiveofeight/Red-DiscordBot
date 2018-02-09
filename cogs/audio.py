@@ -18,6 +18,7 @@ import math
 import time
 import inspect
 import subprocess
+import urllib.parse
 from enum import Enum
 
 __author__ = "tekulvw"
@@ -42,7 +43,7 @@ else:
 
 youtube_dl_options = {
     'source_address': '0.0.0.0',
-    'format': 'bestaudio/best',
+    'format': 'best',
     'extractaudio': True,
     'audioformat': "mp3",
     'nocheckcertificate': True,
@@ -145,6 +146,8 @@ class Song:
         self.url = kwargs.pop('url', None)
         self.webpage_url = kwargs.pop('webpage_url', "")
         self.duration = kwargs.pop('duration', 60)
+        self.start_time = kwargs.pop('start_time', None)
+        self.end_time = kwargs.pop('end_time', None)
 
 class QueuedSong:
     def __init__(self, url, channel):
@@ -327,7 +330,7 @@ class Audio:
         if self._old_game is False:
             self._old_game = list(self.bot.servers)[0].me.game
         status = list(self.bot.servers)[0].me.status
-        game = discord.Game(name=song.title)
+        game = discord.Game(name=song.title, type=2)
         await self.bot.change_presence(status=status, game=game)
         log.debug('Bot status changed to song title: ' + song.title)
 
@@ -396,7 +399,7 @@ class Audio:
         self.queue[server.id][QueueKey.QUEUE] = deque()
         self.queue[server.id][QueueKey.TEMP_QUEUE] = deque()
 
-    async def _create_ffmpeg_player(self, server, filename, local=False):
+    async def _create_ffmpeg_player(self, server, filename, local=False, start_time=None, end_time=None):
         """This function will guarantee we have a valid voice client,
             even if one doesn't exist previously."""
         voice_channel_id = self.queue[server.id][QueueKey.VOICE_CHANNEL_ID]
@@ -429,6 +432,12 @@ class Audio:
 
         use_avconv = self.settings["AVCONV"]
         options = '-b:a 64k -bufsize 64k'
+        before_options = ''
+
+        if start_time:
+            before_options += '-ss {}'.format(start_time)
+        if end_time:
+            options += ' -to {} -copyts'.format(end_time)
 
         try:
             voice_client.audio_player.process.kill()
@@ -441,7 +450,7 @@ class Audio:
         log.debug("making player on sid {}".format(server.id))
 
         voice_client.audio_player = voice_client.create_ffmpeg_player(
-            song_filename, use_avconv=use_avconv, options=options)
+            song_filename, use_avconv=use_avconv, options=options, before_options=before_options)
 
         # Set initial volume
         vol = self.get_server_settings(server)['VOLUME'] / 100
@@ -884,7 +893,9 @@ class Audio:
                 raise
 
         voice_client = await self._create_ffmpeg_player(server, song.id,
-                                                        local=local)
+                                                        local=local,
+                                                        start_time=song.start_time,
+                                                        end_time=song.end_time)
         # That ^ creates the audio_player property
 
         voice_client.audio_player.start()
@@ -1450,7 +1461,11 @@ class Audio:
             url = "[SEARCH:]" + url
 
         if "[SEARCH:]" not in url and "youtube" in url:
-            url = url.split("&")[0]  # Temp fix for the &list issue
+            parsed_url = urllib.parse.urlparse(url)
+            query = urllib.parse.parse_qs(parsed_url.query)
+            query.pop("list", None)
+            parsed_url = parsed_url._replace(query=urllib.parse.urlencode(query, True))
+            url = urllib.parse.urlunparse(parsed_url)
 
         self._stop_player(server)
         self._clear_queue(server)
@@ -1570,12 +1585,6 @@ class Audio:
             await self.bot.say("Invalid link.")
         else:
             await self.bot.say("Done.")
-
-    @playlist.command(pass_context=True, no_pm=True, name="extend")
-    async def playlist_extend(self, ctx, playlist_url_or_name):
-        """Extends a playlist with a playlist link"""
-        # Need better wording ^
-        await self.bot.say("Not implemented yet.")
 
     @playlist.command(pass_context=True, no_pm=True, name="list")
     async def playlist_list(self, ctx):
@@ -1733,7 +1742,11 @@ class Audio:
             url = "[SEARCH:]" + url
 
         if "[SEARCH:]" not in url and "youtube" in url:
-            url = url.split("&")[0]  # Temp fix for the &list issue
+            parsed_url = urllib.parse.urlparse(url)
+            query = urllib.parse.parse_qs(parsed_url.query)
+            query.pop("list", None)
+            parsed_url = parsed_url._replace(query=urllib.parse.urlencode(query, True))
+            url = urllib.parse.urlunparse(parsed_url)
 
         # We have a queue to modify
         if self.queue[server.id][QueueKey.PLAYLIST]:
@@ -2150,7 +2163,7 @@ class Audio:
                     return
                 if repeat and last_song:
                     queued_last_song = QueuedSong(last_song.webpage_url, last_song_channel)
-                    queue.append(last_song.webpage_url)
+                    queue.append(queued_last_song)
             else:
                 song = None
             self._set_queue_nowplaying(server, song, channel)
