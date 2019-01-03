@@ -7,7 +7,6 @@ from cogs.utils.dataIO import dataIO
 from cogs.utils import checks
 from cogs.utils.chat_formatting import pagify, escape
 from urllib.parse import urlparse
-from __main__ import send_cmd_help, settings
 from json import JSONDecodeError
 import re
 import logging
@@ -208,11 +207,11 @@ class Playlist:
         if self.main_class._playlist_exists_global(self.name):
             return False
 
-        admin_role = settings.get_server_admin(self.server)
-        mod_role = settings.get_server_mod(self.server)
+        admin_role = self.bot.settings.get_server_admin(self.server)
+        mod_role = self.bot.settings.get_server_mod(self.server)
 
         is_playlist_author = self.is_author(user)
-        is_bot_owner = user.id == settings.owner
+        is_bot_owner = user.id == self.bot.settings.owner
         is_server_owner = self.server.owner.id == self.author
         is_admin = discord.utils.get(user.roles, name=admin_role) is not None
         is_mod = discord.utils.get(user.roles, name=mod_role) is not None
@@ -360,14 +359,15 @@ class Audio:
         self.queue[server.id][QueueKey.QUEUE].appendleft(queued_song)
 
     def _cache_desired_files(self):
-        filelist = []
+        filelist = set()
+
         for server in self.downloaders:
             song = self.downloaders[server].song
             try:
-                filelist.append(song.id)
+                filelist.add(song.id)
             except AttributeError:
                 pass
-        shuffle(filelist)
+
         return filelist
 
     def _cache_max(self):
@@ -380,13 +380,15 @@ class Audio:
 
     def _cache_required_files(self):
         queue = copy.deepcopy(self.queue)
-        filelist = []
+        filelist = set()
+
         for server in queue:
             now_playing = queue[server].get(QueueKey.NOW_PLAYING)
             try:
-                filelist.append(now_playing.id)
+                filelist.add(now_playing.id)
             except AttributeError:
                 pass
+
         return filelist
 
     def _cache_size(self):
@@ -552,16 +554,22 @@ class Audio:
         prev_size = self._cache_size()
 
         for file in os.listdir(self.cache_path):
-            if file not in reqd:
-                if ignore_desired or file not in opt:
-                    try:
-                        os.remove(os.path.join(self.cache_path, file))
-                    except OSError:
-                        # A directory got in the cache?
-                        pass
-                    except WindowsError:
-                        # Removing a file in use, reqd failed
-                        pass
+            if file in reqd:
+                continue
+            elif not ignore_desired:
+                if file in opt:
+                    continue
+                elif file.endswith('.part') and file[:-5] in opt:
+                    continue
+
+            try:
+                os.remove(os.path.join(self.cache_path, file))
+            except OSError:
+                # A directory got in the cache?
+                pass
+            except WindowsError:
+                # Removing a file in use, reqd failed
+                pass
 
         post_size = self._cache_size()
         dumped = prev_size - post_size
@@ -1137,7 +1145,7 @@ class Audio:
     async def audioset(self, ctx):
         """Audio settings."""
         if ctx.invoked_subcommand is None:
-            await send_cmd_help(ctx)
+            await self.bot.send_cmd_help(ctx)
             return
 
     @audioset.command(name="cachemax")
@@ -1314,7 +1322,7 @@ class Audio:
     async def audiostat(self, ctx):
         """General stats on audio stuff."""
         if ctx.invoked_subcommand is None:
-            await send_cmd_help(ctx)
+            await self.bot.send_cmd_help(ctx)
             return
 
     @audiostat.command(name="servers")
@@ -1330,7 +1338,7 @@ class Audio:
     async def cache(self, ctx):
         """Cache management tools."""
         if ctx.invoked_subcommand is None:
-            await send_cmd_help(ctx)
+            await self.bot.send_cmd_help(ctx)
             return
 
     @cache.command(name="dump")
@@ -1383,9 +1391,11 @@ class Audio:
 
         await self._join_voice_channel(voice_channel)
 
-    @commands.command(name="sb", pass_context=True, no_pm=True)
-    async def local(self, ctx, name):
+    @commands.group(name="sb", pass_context=True, no_pm=True)
+    async def local(self, ctx):
         """Play a clip.  See https://drela.one/musicbot.html for a list of files."""
+        if ctx.invoked_subcommand is None:
+            await self.bot.send_cmd_help(ctx)
 
         server = ctx.message.server
         author = ctx.message.author
@@ -1466,6 +1476,10 @@ class Audio:
         author = ctx.message.author
         voice_channel = author.voice_channel
         channel = ctx.message.channel
+
+        if "www.youtube.com/playlist" in url:
+            await self.bot.send_message(channel, "Use [p]playlist to manage playlist urls.")
+            return
 
         # Checking if playing in current server
 
@@ -1563,7 +1577,7 @@ class Audio:
     async def playlist(self, ctx):
         """Playlist management/control."""
         if ctx.invoked_subcommand is None:
-            await send_cmd_help(ctx)
+            await self.bot.send_cmd_help(ctx)
 
     @playlist.command(pass_context=True, no_pm=True, name="create")
     async def playlist_create(self, ctx, name):
@@ -2027,10 +2041,10 @@ class Audio:
         if not self.get_server_settings(server)["VOTE_ENABLED"]:
             return True
 
-        admin_role = settings.get_server_admin(server)
-        mod_role = settings.get_server_mod(server)
+        admin_role = self.bot.settings.get_server_admin(server)
+        mod_role = self.bot.settings.get_server_mod(server)
 
-        is_owner = member.id == settings.owner
+        is_owner = member.id == self.bot.settings.owner
         is_server_owner = member == server.owner
         is_admin = discord.utils.get(member.roles, name=admin_role) is not None
         is_mod = discord.utils.get(member.roles, name=mod_role) is not None
