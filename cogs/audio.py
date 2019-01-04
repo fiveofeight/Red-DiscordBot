@@ -1391,12 +1391,15 @@ class Audio:
 
         await self._join_voice_channel(voice_channel)
 
-    @commands.group(name="sb", pass_context=True, no_pm=True)
+    @commands.group(pass_context=True, no_pm=True)
     async def local(self, ctx):
-        """Play a clip.  See https://drela.one/musicbot.html for a list of files."""
+        """Local playlists commands"""
         if ctx.invoked_subcommand is None:
             await self.bot.send_cmd_help(ctx)
 
+    @local.command(name="start", pass_context=True, no_pm=True)
+    async def play_local(self, ctx, *, name):
+        """Plays a local playlist See https://drela.one/musicbot.html for a list of files."""
         server = ctx.message.server
         author = ctx.message.author
         voice_channel = author.voice_channel
@@ -1448,6 +1451,17 @@ class Audio:
             return
 
         self._play_local_playlist(server, name, channel)
+
+    @local.command(name="list", no_pm=True)
+    async def list_local(self):
+        """Lists local playlists"""
+        playlists = ", ".join(self._list_local_playlists())
+        if playlists:
+            playlists = "Available local playlists:\n\n" + playlists
+            for page in pagify(playlists, delims=[" "]):
+                await self.bot.say(page)
+        else:
+            await self.bot.say("There are no playlists.")
 
     @commands.command(pass_context=True, no_pm=True)
     async def pause(self, ctx):
@@ -1771,7 +1785,7 @@ class Audio:
         """Plays a random soundboard clip"""
         random_clip =  choice(self._list_local_playlists())
         await self.bot.say("Picking a clip at random...  {}!".format(random_clip))
-        await ctx.invoke(self.local, random_clip)
+        await ctx.invoke(self.play_local, name=random_clip)
 
 
     @playlist.command(pass_context=True, no_pm=True, name="mix")
